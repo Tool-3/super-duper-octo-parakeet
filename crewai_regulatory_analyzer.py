@@ -12,7 +12,7 @@ def get_google_llm(temperature):
     asyncio.set_event_loop(loop)
     try:
         return ChatGoogleGenerativeAI(
-            model="gemini-2.0-pro-exp-02-05",
+            model="gemini-pro",
             temperature=temperature,
             google_api_key=os.getenv("GOOGLE_API_KEY")
         )
@@ -41,12 +41,22 @@ class RegulatoryParserAgent(Agent):
             backstory="Expert in parsing legal and regulatory documents.",
             verbose=False,
             allow_delegation=True,
-            llm=get_llm("groq", temperature)  # Default LLM for parsing
+            llm=get_llm("groq", temperature)
         )
 
     def parse_document(self, document_content):
         """Parse document content into paragraphs."""
         return [p.strip() for p in document_content.split('\n\n') if p.strip()]
+
+class ContextAnalyzerAgent(Agent):
+    def __init__(self, temperature, industry):
+        super().__init__(
+            role='Context Analyzer',
+            goal=f'Analyze the overall context of the document for the {industry} industry.',
+            backstory="Expert in understanding regulatory contexts and industry-specific requirements.",
+            verbose=False,
+            llm=get_llm("groq", temperature)
+        )
 
 class ActionItemAgent(Agent):
     def __init__(self, api_choice, temperature, industry):
@@ -60,6 +70,26 @@ class ActionItemAgent(Agent):
             llm=llm
         )
 
+class ComplianceCheckerAgent(Agent):
+    def __init__(self, temperature, industry):
+        super().__init__(
+            role='Compliance Checker',
+            goal=f'Check action items against compliance frameworks for the {industry} industry.',
+            backstory="Expert in regulatory compliance and frameworks.",
+            verbose=False,
+            llm=get_llm("groq", temperature)
+        )
+
+class PriorityAssignerAgent(Agent):
+    def __init__(self, temperature):
+        super().__init__(
+            role='Priority Assigner',
+            goal='Assign priority levels to action items based on risk and impact.',
+            backstory="Experienced risk analyst.",
+            verbose=False,
+            llm=get_llm("groq", temperature)
+        )
+
 class RiskMitigationAgent(Agent):
     def __init__(self, api_choice, temperature, industry):
         llm = get_llm(api_choice, temperature)
@@ -71,37 +101,117 @@ class RiskMitigationAgent(Agent):
             llm=llm
         )
 
+class TimelinePlannerAgent(Agent):
+    def __init__(self, temperature):
+        super().__init__(
+            role='Timeline Planner',
+            goal='Suggest timelines for implementing action items and mitigations.',
+            backstory="Expert in project planning and timelines.",
+            verbose=False,
+            llm=get_llm("groq", temperature)
+        )
+
+class ReportGeneratorAgent(Agent):
+    def __init__(self, temperature):
+        super().__init__(
+            role='Report Generator',
+            goal='Compile all outputs into a structured, human-readable report.',
+            backstory="Expert in creating professional reports.",
+            verbose=False,
+            llm=get_llm("groq", temperature)
+        )
+
 # --- Task Definitions ---
-def create_tasks(parser_agent, action_agent, mitigation_agent, document_content):
+def create_tasks(parser_agent, context_agent, action_agent, compliance_agent, priority_agent, mitigation_agent, timeline_agent, report_agent, document_content):
     """Create tasks for the crew with proper dependencies."""
     paragraphs = parser_agent.parse_document(document_content)
     tasks = []
+
+    # Context Analysis Task
+    context_task = Task(
+        description="Analyze the overall context of the document.",
+        agent=context_agent,
+        expected_output="Document context including industry, regulatory body, and jurisdiction."
+    )
+    tasks.append(context_task)
 
     for idx, paragraph in enumerate(paragraphs):
         # Action item extraction task
         action_task = Task(
             description=f"Extract action items from paragraph {idx+1}",
             agent=action_agent,
+            context=[context_task],
             expected_output="List of actionable items from the regulatory paragraph."
         )
-        
-        # Risk mitigation task with dependency
+        tasks.append(action_task)
+
+        # Compliance check task
+        compliance_task = Task(
+            description=f"Check compliance for paragraph {idx+1} actions",
+            agent=compliance_agent,
+            context=[action_task],
+            expected_output="Compliance status for each action item."
+        )
+        tasks.append(compliance_task)
+
+        # Priority assignment task
+        priority_task = Task(
+            description=f"Assign priority to paragraph {idx+1} actions",
+            agent=priority_agent,
+            context=[action_task],
+            expected_output="Priority levels for each action item."
+        )
+        tasks.append(priority_task)
+
+        # Risk mitigation task
         mitigation_task = Task(
             description=f"Suggest mitigations for paragraph {idx+1} actions",
             agent=mitigation_agent,
             context=[action_task],
             expected_output="Risk mitigation strategies for the identified action items."
         )
-        
-        tasks.extend([action_task, mitigation_task])
-    
+        tasks.append(mitigation_task)
+
+        # Timeline planning task
+        timeline_task = Task(
+            description=f"Plan timelines for paragraph {idx+1} actions",
+            agent=timeline_agent,
+            context=[action_task, mitigation_task],
+            expected_output="Timelines for implementing actions and mitigations."
+        )
+        tasks.append(timeline_task)
+
+    # Report generation task
+    report_task = Task(
+        description="Generate a final report.",
+        agent=report_agent,
+        context=tasks,
+        expected_output="Structured, human-readable report."
+    )
+    tasks.append(report_task)
+
     return tasks
 
 # --- Main Processing Function ---
 def process_regulatory_obligation(input_type, input_source, api_actions="groq", api_mitigation="groq", temperature=0.5, industry="General"):
     """Process regulatory obligation from URL or file."""
-    crew = create_regulatory_crew(api_actions, api_mitigation, temperature, industry)
-    
+    # Initialize agents
+    parser_agent = RegulatoryParserAgent(temperature)
+    context_agent = ContextAnalyzerAgent(temperature, industry)
+    action_agent = ActionItemAgent(api_actions, temperature, industry)
+    compliance_agent = ComplianceCheckerAgent(temperature, industry)
+    priority_agent = PriorityAssignerAgent(temperature)
+    mitigation_agent = RiskMitigationAgent(api_mitigation, temperature, industry)
+    timeline_agent = TimelinePlannerAgent(temperature)
+    report_agent = ReportGeneratorAgent(temperature)
+
+    # Create crew
+    crew = Crew(
+        agents=[parser_agent, context_agent, action_agent, compliance_agent, priority_agent, mitigation_agent, timeline_agent, report_agent],
+        tasks=[],
+        verbose=False
+    )
+
     # Load document content
     document_content = ""
     if input_type == "url":
@@ -120,18 +230,24 @@ def process_regulatory_obligation(input_type, input_source, api_actions="groq", 
         return "No valid document content found."
 
     # Create and execute tasks
-    parser = RegulatoryParserAgent(temperature)
-    crew.tasks = create_tasks(parser, crew.agents[1], crew.agents[2], document_content)
+    crew.tasks = create_tasks(parser_agent, context_agent, action_agent, compliance_agent, priority_agent, mitigation_agent, timeline_agent, report_agent, document_content)
     results = crew.kickoff()
 
     # Structure results
-    output = {}
-    paragraphs = parser.parse_document(document_content)
+    output = {
+        "context": results[0],  # Context analysis
+        "paragraphs": []
+    }
+    paragraphs = parser_agent.parse_document(document_content)
     for idx, para in enumerate(paragraphs):
-        output[f"Paragraph {idx+1}"] = {
+        output["paragraphs"].append({
             "text": para,
-            "actions": results[idx*2],
-            "mitigations": results[idx*2+1]
-        }
-    
+            "actions": results[idx*5 + 1],  # Action items
+            "compliance": results[idx*5 + 2],  # Compliance status
+            "priority": results[idx*5 + 3],  # Priority levels
+            "mitigations": results[idx*5 + 4],  # Risk mitigations
+            "timeline": results[idx*5 + 5]  # Timelines
+        })
+    output["report"] = results[-1]  # Final report
+
     return output

@@ -1,0 +1,8 @@
+chromadb==0.4.14
+streamlit
+crewai
+langchain-groq
+google.generativeai
+requests
+setuptools
+langchain-google-genai

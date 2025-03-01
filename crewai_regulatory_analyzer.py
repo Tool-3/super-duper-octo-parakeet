@@ -8,8 +8,15 @@ from langchain_groq import ChatGroq
 from langchain_google_genai import ChatGoogleGenerativeAI
 from concurrent.futures import ThreadPoolExecutor
 import warnings
+import logging
+
+# Suppress specific warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
 warnings.filterwarnings("ignore", category=SyntaxWarning)
+
+# Configure logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 # --- Pydantic Models ---
 class ActionItem(BaseModel):
@@ -147,9 +154,11 @@ class AgentFactory:
 
 # --- Core Processing Functions ---
 async def parse_document(agent: BaseAgent, content: str) -> List[str]:
+    logger.debug("Parsing document content")
     return [p.strip() for p in content.split('\n\n') if p.strip()]
 
 async def process_paragraph(paragraph: str, agents: Dict[str, BaseAgent]) -> ParagraphAnalysis:
+    logger.debug(f"Processing paragraph: {paragraph[:50]}...")
     tasks = [
         Task(description=f"Extract actions from: {paragraph[:100]}...", agent=agents["action"]),
         Task(description="Check compliance", agent=agents["compliance"]),
@@ -184,6 +193,8 @@ async def process_regulatory_obligation(
     industry: str = "General"
 ) -> DocumentAnalysis:
     try:
+        logger.debug(f"Starting processing with input type: {input_type}, source: {input_source}")
+        
         # Load content
         if input_type == "url":
             async with aiohttp.ClientSession() as session:
@@ -228,12 +239,14 @@ async def process_regulatory_obligation(
         report_crew = Crew(agents=[agents["report"]], tasks=[report_task])
         report_result = await asyncio.to_thread(report_crew.kickoff)
 
+        logger.debug("Document processed successfully")
         return DocumentAnalysis(
             context=context_result if isinstance(context_result, dict) else {"summary": str(context_result)},
             paragraphs=paragraph_results,
             report=str(report_result)
         )
     except Exception as e:
+        logger.error(f"Processing failed: {str(e)}")
         raise RuntimeError(f"Processing failed: {str(e)}")
 
 # --- Entry Point ---

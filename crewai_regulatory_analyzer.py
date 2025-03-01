@@ -1,319 +1,289 @@
 import os
 import asyncio
 import requests
-from typing import List, Dict
+from typing import List, Dict, Any
 from pydantic import BaseModel, Field
 from crewai import Crew, Agent, Task
 from langchain_groq import ChatGroq
 from langchain_google_genai import ChatGoogleGenerativeAI
+import warnings
 
-# --------------------------
-# Configuration Models
-# --------------------------
-class AnalysisConfig(BaseModel):
-    industry: str = Field(default="General", description="Industry focus for analysis")
-    jurisdiction: str = Field(default="Global", description="Regulatory jurisdiction")
-    risk_tolerance: str = Field(default="Medium", description="Organization's risk tolerance level")
-    temperature: float = Field(default=0.3, ge=0.1, le=1.0, description="LLM creativity vs precision")
+# Suppress specific warnings
+warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
+warnings.filterwarnings("ignore", category=SyntaxWarning, module="langchain.agents.json_chat.base")
 
-class DocumentMetadata(BaseModel):
-    source: str = Field(..., description="Document source information")
-    document_type: str = Field(..., description="Type of regulatory document")
-    effective_date: str = Field(..., description="Document effective date")
+# --- Pydantic Models for Validation ---
+class ActionItem(BaseModel):
+    description: str = Field(..., description="Specific action required")
+    priority: str = Field(..., description="High/Medium/Low priority level")
+    compliance_status: str = Field(..., description="Compliance status")
+    timeline: str = Field(..., description="Implementation timeline")
 
-# --------------------------
-# LLM Configuration
-# --------------------------
-class LLMFactory:
-    @staticmethod
-    def get_llm(provider: str, config: AnalysisConfig):
-        if provider == "groq":
+class RiskMitigation(BaseModel):
+    strategy: str = Field(..., description="Mitigation strategy")
+    stakeholders: List[str] = Field(..., description="Responsible parties")
+    steps: List[str] = Field(..., description="Implementation steps")
+
+class ParagraphAnalysis(BaseModel):
+    text: str = Field(..., description="Original paragraph text")
+    actions: List[ActionItem] = Field(..., description="Identified actions")
+    mitigations: List[RiskMitigation] = Field(..., description="Risk mitigations")
+
+class DocumentAnalysis(BaseModel):
+    context: Dict[str, Any] = Field(..., description="Document context analysis")
+    paragraphs: List[ParagraphAnalysis] = Field(..., description="Paragraph analyses")
+    report: str = Field(..., description="Executive summary report")
+
+# --- LLM Initialization with Error Handling ---
+class LLMInitializationError(Exception):
+    pass
+
+def get_google_llm(temperature: float) -> ChatGoogleGenerativeAI:
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        return ChatGoogleGenerativeAI(
+            model="gemini-2.0-flash",
+            temperature=temperature,
+            google_api_key=os.getenv("GOOGLE_API_KEY")
+        )
+    except Exception as e:
+        raise LLMInitializationError(f"Google AI initialization failed: {str(e)}")
+    finally:
+        loop.close()
+
+def get_llm(api_choice: str, temperature: float) -> ChatGroq | ChatGoogleGenerativeAI:
+    try:
+        if api_choice == "groq":
             return ChatGroq(
-                temperature=config.temperature,
+                temperature=temperature,
                 model="mixtral-8x7b-32768",
                 groq_api_key=os.getenv("GROQ_API_KEY")
             )
-        elif provider == "google_ai":
-            return LLMFactory._init_google_llm(config)
-        raise ValueError(f"Unsupported LLM provider: {provider}")
-
-    @staticmethod
-    def _init_google_llm(config: AnalysisConfig):
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            return ChatGoogleGenerativeAI(
-                model="gemini-pro",
-                temperature=config.temperature,
-                google_api_key=os.getenv("GOOGLE_API_KEY")
-            )
-        finally:
-            loop.close()
-
-# --------------------------
-# Agent Definitions
-# --------------------------
-class RegulatoryAnalyst(Agent):
-    def __init__(self, config: AnalysisConfig):
-        super().__init__(
-            role="Senior Regulatory Analyst",
-            goal="Accurate interpretation of regulatory requirements",
-            backstory=(
-                "With over 15 years of experience in regulatory compliance across multiple industries, "
-                "you specialize in breaking down complex legal texts into actionable organizational requirements. "
-                "Your analyses are known for their precision and practical applicability."
-            ),
-            verbose=True,
-            allow_delegation=False,
-            llm=LLMFactory.get_llm("groq", config),
-            memory=True
-        )
-
-class ComplianceArchitect(Agent):
-    def __init__(self, config: AnalysisConfig):
-        super().__init__(
-            role="Compliance Framework Architect",
-            goal="Develop implementable compliance strategies",
-            backstory=(
-                "As a certified compliance professional with expertise in multiple regulatory frameworks (GDPR, HIPAA, SOX), "
-                "you transform regulatory requirements into operational workflows while maintaining audit readiness."
-            ),
-            verbose=True,
-            allow_delegation=True,
-            llm=LLMFactory.get_llm("google_ai", config),
-            memory=True
-        )
-
-class RiskStrategist(Agent):
-    def __init__(self, config: AnalysisConfig):
-        super().__init__(
-            role="Enterprise Risk Strategist",
-            goal="Identify and mitigate regulatory risks",
-            backstory=(
-                "With a PhD in Risk Management and 12 years of consulting experience, "
-                "you develop risk mitigation strategies that balance compliance costs with organizational objectives."
-            ),
-            verbose=True,
-            allow_delegation=True,
-            llm=LLMFactory.get_llm("groq", config),
-            memory=True
-        )
-
-class QualityValidator(Agent):
-    def __init__(self, config: AnalysisConfig):
-        super().__init__(
-            role="Quality Assurance Specialist",
-            goal="Ensure analysis accuracy and completeness",
-            backstory=(
-                "As a meticulous former auditor with expertise in regulatory documentation, "
-                "you catch inconsistencies and validate compliance recommendations against industry standards."
-            ),
-            verbose=True,
-            allow_delegation=False,
-            llm=LLMFactory.get_llm("google_ai", config),
-            memory=True
-        )
-
-# --------------------------
-# Task Definitions
-# --------------------------
-class AnalysisTasks:
-    def __init__(self, config: AnalysisConfig, metadata: DocumentMetadata):
-        self.config = config
-        self.metadata = metadata
-
-    def contextual_analysis_task(self, agent: Agent) -> Task:
-        return Task(
-            description=(
-                f"Analyze the regulatory document from {self.metadata.source} "
-                f"effective {self.metadata.effective_date} for {self.config.industry} industry. "
-                "Identify key regulatory obligations and their applicability scope."
-            ),
-            expected_output=(
-                "Structured analysis of document scope, key obligations, "
-                "and applicability to different organizational functions."
-            ),
-            agent=agent,
-            output_json={
-                "document_summary": "Brief overview of document purpose and scope",
-                "key_obligations": "List of critical regulatory requirements",
-                "applicability_matrix": "Mapping of requirements to business units"
-            }
-        )
-
-    def compliance_mapping_task(self, agent: Agent) -> Task:
-        return Task(
-            description=(
-                "Develop compliance implementation roadmap considering "
-                f"{self.config.jurisdiction} jurisdiction and {self.config.risk_tolerance} risk tolerance."
-            ),
-            expected_output=(
-                "Prioritized compliance action plan with resource requirements "
-                "and implementation timelines."
-            ),
-            agent=agent,
-            output_json={
-                "action_plan": "List of compliance actions with priorities",
-                "resource_allocation": "Required resources for implementation",
-                "timeline": "Realistic implementation schedule"
-            }
-        )
-
-    def risk_assessment_task(self, agent: Agent) -> Task:
-        return Task(
-            description=(
-                "Conduct risk impact analysis considering organizational risk tolerance "
-                f"({self.config.risk_tolerance}) and {self.config.industry} industry standards."
-            ),
-            expected_output=(
-                "Risk assessment matrix with mitigation strategies and contingency plans "
-                "for high-probability/high-impact risks"
-            ),
-            agent=agent,
-            output_json={
-                "risk_matrix": "Assessment of identified risks",
-                "mitigation_strategies": "Detailed risk mitigation approaches",
-                "contingency_plans": "Fallback plans for residual risks"
-            }
-        )
-
-    def validation_task(self, agent: Agent, context: List[Task]) -> Task:
-        return Task(
-            description=(
-                "Validate all analysis outputs for consistency, completeness, "
-                "and compliance with industry best practices."
-            ),
-            expected_output=(
-                "Validation report highlighting any discrepancies, "
-                "potential gaps, and improvement recommendations"
-            ),
-            agent=agent,
-            context=context,
-            output_json={
-                "validation_summary": "Overall validation status",
-                "identified_issues": "List of potential problems",
-                "corrective_actions": "Recommended improvements"
-            }
-        )
-
-# --------------------------
-# Analysis Orchestrator
-# --------------------------
-class RegulatoryAnalysisOrchestrator:
-    def __init__(self, config: AnalysisConfig, metadata: DocumentMetadata):
-        self.config = config
-        self.metadata = metadata
-        self.tasks = AnalysisTasks(config, metadata)
-        
-        self.analyst = RegulatoryAnalyst(config)
-        self.architect = ComplianceArchitect(config)
-        self.risk_strategist = RiskStrategist(config)
-        self.validator = QualityValidator(config)
-
-    def create_crew(self) -> Crew:
-        tasks = [
-            self.tasks.contextual_analysis_task(self.analyst),
-            self.tasks.compliance_mapping_task(self.architect),
-            self.tasks.risk_assessment_task(self.risk_strategist),
-            self.tasks.validation_task(self.validator, [
-                self.tasks.contextual_analysis_task,
-                self.tasks.compliance_mapping_task,
-                self.tasks.risk_assessment_task
-            ])
-        ]
-
-        return Crew(
-            agents=[self.analyst, self.architect, self.risk_strategist, self.validator],
-            tasks=tasks,
-            verbose=2,
-            memory=True,
-            process="sequential"  # Ensures task order and dependency handling
-        )
-
-# --------------------------
-# Main Execution Flow
-# --------------------------
-def analyze_regulatory_document(document_content: str, 
-                               config: AnalysisConfig, 
-                               metadata: DocumentMetadata) -> Dict:
-    """Main analysis workflow executor"""
-    orchestrator = RegulatoryAnalysisOrchestrator(config, metadata)
-    crew = orchestrator.create_crew()
-    
-    try:
-        results = crew.kickoff(inputs={'document_content': document_content})
-        return {
-            "status": "success",
-            "analysis": results,
-            "metadata": metadata.dict(),
-            "config": config.dict()
-        }
+        elif api_choice == "google_ai":
+            return get_google_llm(temperature)
+        raise ValueError("Invalid API choice")
     except Exception as e:
-        return {
-            "status": "error",
-            "message": str(e),
-            "metadata": metadata.dict(),
-            "config": config.dict()
-        }
+        raise LLMInitializationError(f"LLM initialization failed: {str(e)}")
 
-# --------------------------
-# Streamlit Interface
-# --------------------------
-def streamlit_interface():
-    import streamlit as st
-    
-    st.set_page_config(page_title="Enterprise Regulatory Analyzer", layout="wide")
-    st.title("Enterprise Regulatory Analysis Platform")
-    
-    with st.sidebar:
-        st.header("Analysis Configuration")
-        industry = st.selectbox("Industry Focus", ["Healthcare", "Finance", "Technology", "Energy"])
-        jurisdiction = st.selectbox("Jurisdiction", ["EU", "US Federal", "California", "Global"])
-        risk_tolerance = st.select_slider("Risk Tolerance", ["Low", "Medium", "High"])
-        temperature = st.slider("Analysis Creativity", 0.1, 1.0, 0.3)
-        
-    doc_source = st.radio("Document Source", ["URL", "File Upload"])
-    document_content = ""
-    
-    if doc_source == "URL":
-        url = st.text_input("Document URL")
-        if url:
-            try:
-                response = requests.get(url)
-                document_content = response.text
-            except Exception as e:
-                st.error(f"Failed to fetch document: {str(e)}")
-    else:
-        uploaded_file = st.file_uploader("Upload Document", type=["txt", "pdf"])
-        if uploaded_file:
-            document_content = uploaded_file.read().decode("utf-8")
-    
-    if st.button("Start Analysis"):
-        if not document_content:
-            st.error("Please provide document content")
-            return
-            
-        config = AnalysisConfig(
-            industry=industry,
-            jurisdiction=jurisdiction,
-            risk_tolerance=risk_tolerance,
-            temperature=temperature
+# --- Enhanced Agent Definitions ---
+class BaseAgent(Agent):
+    def __init__(self, **kwargs):
+        super().__init__(
+            verbose=False,
+            allow_delegation=True,
+            **kwargs
         )
-        
-        metadata = DocumentMetadata(
-            source=doc_source,
-            document_type="Regulatory Text",
-            effective_date="2024-01-01"  # Should be extracted from document
-        )
-        
-        with st.spinner("Performing comprehensive analysis..."):
-            result = analyze_regulatory_document(document_content, config, metadata)
-            
-            if result['status'] == 'success':
-                st.success("Analysis Complete")
-                st.json(result)
-            else:
-                st.error(f"Analysis Failed: {result['message']}")
 
-if __name__ == "__main__":
-    streamlit_interface()
+class RegulatoryParserAgent(BaseAgent):
+    def __init__(self, temperature: float):
+        super().__init__(
+            role='Regulatory Document Parser',
+            goal='Break down regulatory text into paragraphs for analysis.',
+            backstory="Expert in parsing legal and regulatory documents.",
+            llm=get_llm("groq", temperature)
+        )
+
+    def parse_document(self, document_content: str) -> List[str]:
+        try:
+            return [p.strip() for p in document_content.split('\n\n') if p.strip()]
+        except Exception as e:
+            raise ValueError(f"Document parsing failed: {str(e)}")
+
+class ContextAnalyzerAgent(BaseAgent):
+    def __init__(self, temperature: float, industry: str):
+        super().__init__(
+            role='Context Analyzer',
+            goal=f'Analyze document context for {industry} industry',
+            backstory="Expert in regulatory contexts and industry requirements.",
+            llm=get_llm("groq", temperature)
+        )
+
+class ActionItemAgent(BaseAgent):
+    def __init__(self, api_choice: str, temperature: float, industry: str):
+        super().__init__(
+            role='Action Item Extractor',
+            goal=f'Identify actionable items for {industry} industry',
+            backstory="Experienced compliance officer.",
+            llm=get_llm(api_choice, temperature)
+        )
+
+class ComplianceCheckerAgent(BaseAgent):
+    def __init__(self, temperature: float, industry: str):
+        super().__init__(
+            role='Compliance Checker',
+            goal=f'Check compliance for {industry} industry',
+            backstory="Expert in regulatory compliance frameworks.",
+            llm=get_llm("groq", temperature)
+        )
+
+class PriorityAssignerAgent(BaseAgent):
+    def __init__(self, temperature: float):
+        super().__init__(
+            role='Priority Assigner',
+            goal='Assign priority levels to action items.',
+            backstory="Experienced risk analyst.",
+            llm=get_llm("groq", temperature)
+        )
+
+class RiskMitigationAgent(BaseAgent):
+    def __init__(self, api_choice: str, temperature: float, industry: str):
+        super().__init__(
+            role='Risk Mitigation Strategist',
+            goal=f'Suggest risk mitigations for {industry} industry',
+            backstory="Expert in risk management.",
+            llm=get_llm(api_choice, temperature)
+        )
+
+class TimelinePlannerAgent(BaseAgent):
+    def __init__(self, temperature: float):
+        super().__init__(
+            role='Timeline Planner',
+            goal='Suggest timelines for implementing actions.',
+            backstory="Expert in project planning and timelines.",
+            llm=get_llm("groq", temperature)
+        )
+
+class ReportGeneratorAgent(BaseAgent):
+    def __init__(self, temperature: float):
+        super().__init__(
+            role='Report Generator',
+            goal='Compile all outputs into a structured report.',
+            backstory="Expert in creating professional reports.",
+            llm=get_llm("groq", temperature)
+        )
+
+# --- Task Definitions ---
+def create_tasks(parser_agent, context_agent, action_agent, compliance_agent, priority_agent, mitigation_agent, timeline_agent, report_agent, document_content):
+    """Create tasks for the crew with proper dependencies."""
+    paragraphs = parser_agent.parse_document(document_content)
+    tasks = []
+
+    # Context Analysis Task
+    context_task = Task(
+        description="Analyze the overall context of the document.",
+        agent=context_agent,
+        expected_output="Document context including industry, regulatory body, and jurisdiction."
+    )
+    tasks.append(context_task)
+
+    for idx, paragraph in enumerate(paragraphs):
+        # Action item extraction task
+        action_task = Task(
+            description=f"Extract action items from paragraph {idx+1}",
+            agent=action_agent,
+            context=[context_task],
+            expected_output="List of actionable items from the regulatory paragraph."
+        )
+        tasks.append(action_task)
+
+        # Compliance check task
+        compliance_task = Task(
+            description=f"Check compliance for paragraph {idx+1} actions",
+            agent=compliance_agent,
+            context=[action_task],
+            expected_output="Compliance status for each action item."
+        )
+        tasks.append(compliance_task)
+
+        # Priority assignment task
+        priority_task = Task(
+            description=f"Assign priority to paragraph {idx+1} actions",
+            agent=priority_agent,
+            context=[action_task],
+            expected_output="Priority levels for each action item."
+        )
+        tasks.append(priority_task)
+
+        # Risk mitigation task
+        mitigation_task = Task(
+            description=f"Suggest mitigations for paragraph {idx+1} actions",
+            agent=mitigation_agent,
+            context=[action_task],
+            expected_output="Risk mitigation strategies for the identified action items."
+        )
+        tasks.append(mitigation_task)
+
+        # Timeline planning task
+        timeline_task = Task(
+            description=f"Plan timelines for paragraph {idx+1} actions",
+            agent=timeline_agent,
+            context=[action_task, mitigation_task],
+            expected_output="Timelines for implementing actions and mitigations."
+        )
+        tasks.append(timeline_task)
+
+    # Report generation task
+    report_task = Task(
+        description="Generate a final report.",
+        agent=report_agent,
+        context=tasks,
+        expected_output="Structured, human-readable report."
+    )
+    tasks.append(report_task)
+
+    return tasks
+
+# --- Main Processing Function ---
+def process_regulatory_obligation(
+    input_type: str,
+    input_source: str,
+    api_actions: str = "groq",
+    api_mitigation: str = "groq",
+    temperature: float = 0.5,
+    industry: str = "General"
+) -> DocumentAnalysis:
+    try:
+        # Initialize agents
+        parser_agent = RegulatoryParserAgent(temperature)
+        context_agent = ContextAnalyzerAgent(temperature, industry)
+        action_agent = ActionItemAgent(api_actions, temperature, industry)
+        compliance_agent = ComplianceCheckerAgent(temperature, industry)
+        priority_agent = PriorityAssignerAgent(temperature)
+        mitigation_agent = RiskMitigationAgent(api_mitigation, temperature, industry)
+        timeline_agent = TimelinePlannerAgent(temperature)
+        report_agent = ReportGeneratorAgent(temperature)
+
+        # Create crew
+        crew = Crew(
+            agents=[parser_agent, context_agent, action_agent, compliance_agent, priority_agent, mitigation_agent, timeline_agent, report_agent],
+            tasks=[],
+            verbose=False
+        )
+
+        # Load document content
+        document_content = ""
+        if input_type == "url":
+            response = requests.get(input_source, timeout=10)
+            response.raise_for_status()
+            document_content = response.text
+        elif input_type == "file upload":
+            document_content = input_source
+        else:
+            raise ValueError("Invalid input type")
+
+        if not document_content.strip():
+            raise ValueError("Empty document content")
+
+        # Create and execute tasks
+        crew.tasks = create_tasks(parser_agent, context_agent, action_agent, compliance_agent, priority_agent, mitigation_agent, timeline_agent, report_agent, document_content)
+        results = crew.kickoff()
+
+        # Structure and validate output
+        return DocumentAnalysis(
+            context=results[0],
+            paragraphs=[
+                ParagraphAnalysis(
+                    text=para,
+                    actions=results[idx*5 + 1],
+                    mitigations=results[idx*5 + 4]
+                ) for idx, para in enumerate(parser_agent.parse_document(document_content))
+            ],
+            report=results[-1]
+        )
+    except requests.RequestException as e:
+        raise RuntimeError(f"Network error: {str(e)}")
+    except LLMInitializationError as e:
+        raise RuntimeError(f"AI service error: {str(e)}")
+    except Exception as e:
+        raise RuntimeError(f"Processing failed: {str(e)}")

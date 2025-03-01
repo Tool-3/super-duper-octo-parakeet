@@ -142,7 +142,7 @@ async def process_document(
     )
     
     # Process paragraphs in parallel with concurrency limit
-    semaphore = asyncio.Semaphore(5)  # Limit concurrent tasks to manage resources
+    semaphore = asyncio.Semaphore(25)  # Limit concurrent tasks to manage resources
     paragraph_tasks = [
         analyze_paragraph(para, context, combined_agent, semaphore)
         for para in paragraphs

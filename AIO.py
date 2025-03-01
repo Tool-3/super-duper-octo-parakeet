@@ -10,7 +10,6 @@ from concurrent.futures import ThreadPoolExecutor
 import warnings
 import logging
 import json
-import os
 
 # Suppress specific warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
@@ -262,7 +261,12 @@ async def process_regulatory_obligation(
         paragraphs = await parse_document(parser_agent, document_content)
 
         # Analyze context - Directly use the agent to avoid unnecessary Crew
-        context_task = Task(description="Analyze document context", agent=context_agent)
+        # Add expected_output
+        context_task = Task(
+            description="Analyze document context",
+            agent=context_agent,
+            expected_output="str"  # Expecting a string summary
+        )
         context_result = await context_task.execute(context=document_content)
 
         # Parallel paragraph processing
@@ -277,7 +281,8 @@ async def process_regulatory_obligation(
         report_task = Task(
             description="Generate comprehensive report",
             agent=report_agent,
-            context=f"Overall context: {context_result}\nParagraph summaries: {paragraph_context}"
+            context=f"Overall context: {context_result}\nParagraph summaries: {paragraph_context}",
+            expected_output="str"  # Expecting a string report
         )
         report_result = await report_task.execute(context=f"Overall context: {context_result}\nParagraph summaries: {paragraph_context}")
 

@@ -12,7 +12,7 @@ def get_google_llm(temperature):
     asyncio.set_event_loop(loop)
     try:
         return ChatGoogleGenerativeAI(
-            model="gemini-pro",
+            model="gemini-2.0-flash",
             temperature=temperature,
             google_api_key=os.getenv("GOOGLE_API_KEY")
         )

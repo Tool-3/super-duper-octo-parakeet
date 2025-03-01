@@ -13,6 +13,7 @@ warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
 warnings.filterwarnings("ignore", category=SyntaxWarning, module="langchain.agents.json_chat.base")
 
 # --- Pydantic Models for Validation ---
+# Define Pydantic models
 class ActionItem(BaseModel):
     description: str = Field(..., description="Specific action required")
     priority: str = Field(..., description="High/Medium/Low priority level")
@@ -33,8 +34,8 @@ class DocumentAnalysis(BaseModel):
     context: Dict[str, Any] = Field(..., description="Document context analysis")
     paragraphs: List[ParagraphAnalysis] = Field(..., description="Paragraph analyses")
     report: str = Field(..., description="Executive summary report")
+    
 
-# --- LLM Initialization with Error Handling ---
 class LLMInitializationError(Exception):
     pass
 
@@ -287,3 +288,4 @@ def process_regulatory_obligation(
         raise RuntimeError(f"AI service error: {str(e)}")
     except Exception as e:
         raise RuntimeError(f"Processing failed: {str(e)}")
+pass

@@ -60,8 +60,8 @@ class BaseAgent(Agent):
     def __init__(self, **kwargs):
         super().__init__(
             verbose=False,
-            allow_delegation=False,  # Reduce unnecessary delegation overhead
-            cache=True,  # Enable caching for repeated queries
+            allow_delegation=False,
+            cache=True,
             **kwargs
         )
 
@@ -79,7 +79,6 @@ class RegulatoryParserAgent(BaseAgent):
     def parse_document(self, document_content: str) -> tuple:
         return tuple(p.strip() for p in document_content.split('\n\n') if p.strip())
 
-# Define other agents similarly with specific optimizations
 class ContextAnalyzerAgent(BaseAgent):
     def __init__(self, temperature: float, industry: str):
         super().__init__(
@@ -115,7 +114,6 @@ async def analyze_paragraph(
     semaphore: asyncio.Semaphore
 ) -> ParagraphAnalysis:
     async with semaphore:
-        # Combine action item extraction, compliance, priority, mitigation, and timeline in one pass
         result = await asyncio.get_event_loop().run_in_executor(
             None,
             lambda: combined_agent.execute_task(
@@ -132,24 +130,20 @@ async def process_document(
     combined_agent: CombinedAnalysisAgent,
     report_agent: ReportGeneratorAgent
 ) -> DocumentAnalysis:
-    # Parse document
     paragraphs = parser_agent.parse_document(document_content)
     
-    # Get context
     context = await asyncio.get_event_loop().run_in_executor(
         None,
         lambda: context_agent.execute_task("Analyze document context")
     )
     
-    # Process paragraphs in parallel with concurrency limit
-    semaphore = asyncio.Semaphore(25)  # Limit concurrent tasks to manage resources
+    semaphore = asyncio.Semaphore(5)
     paragraph_tasks = [
         analyze_paragraph(para, context, combined_agent, semaphore)
         for para in paragraphs
     ]
     paragraph_analyses = await asyncio.gather(*paragraph_tasks)
     
-    # Generate report
     report = await asyncio.get_event_loop().run_in_executor(
         None,
         lambda: report_agent.execute_task(
@@ -163,7 +157,7 @@ async def process_document(
         report=report
     )
 
-# --- Main Function ---
+# --- Main Function (Fixed Signature) ---
 async def process_regulatory_obligation(
     input_type: str,
     input_source: str,
@@ -172,15 +166,13 @@ async def process_regulatory_obligation(
     industry: str = "General"
 ) -> DocumentAnalysis:
     try:
-        # Initialize agents
         parser_agent = RegulatoryParserAgent(temperature)
         context_agent = ContextAnalyzerAgent(temperature, industry)
         combined_agent = CombinedAnalysisAgent(api_analysis, temperature, industry)
         report_agent = ReportGeneratorAgent(temperature)
 
-        # Load document
         if input_type == "url":
-            async with requests.get(input_source, timeout=10) as response:
+            async with requests.get(input_source) as response:  # Removed timeout parameter for simplicity
                 response.raise_for_status()
                 document_content = await response.text()
         elif input_type == "file upload":
@@ -191,7 +183,6 @@ async def process_regulatory_obligation(
         if not document_content.strip():
             raise ValueError("Empty document content")
 
-        # Process document
         return await process_document(
             document_content,
             parser_agent,
@@ -203,10 +194,16 @@ async def process_regulatory_obligation(
     except Exception as e:
         raise RuntimeError(f"Processing failed: {str(e)}")
 
-# --- Entry Point ---
+# --- Entry Point (Fixed Call) ---
 if __name__ == "__main__":
-    result = asyncio.run(process_regulatory_obligation(
-        input_type="file upload",
-        input_source="Sample regulatory text here..."
-    ))
+    # Use keyword arguments for clarity and to match function signature
+    result = asyncio.run(
+        process_regulatory_obligation(
+            input_type="file upload",
+            input_source="Sample regulatory text here...",
+            api_analysis="groq",  # Optional, matches default
+            temperature=0.5,      # Optional, matches default
+            industry="General"    # Optional, matches default
+        )
+    )
     print(result.json())

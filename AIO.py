@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 import warnings
 import logging
 import json
+import os
 
 # Suppress specific warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")

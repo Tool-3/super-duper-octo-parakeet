@@ -217,6 +217,7 @@ async def process_regulatory_obligation(
         async with ThreadPoolExecutor(max_workers=4) as executor:
             paragraph_tasks = [process_paragraph(para, agents) for para in paragraphs]
             paragraph_results = await asyncio.gather(*paragraph_tasks)
+
         # Generate report
         report_task = Task(
             description="Generate comprehensive report",
@@ -226,6 +227,7 @@ async def process_regulatory_obligation(
         )
         report_crew = Crew(agents=[agents["report"]], tasks=[report_task])
         report_result = await asyncio.to_thread(report_crew.kickoff)
+
         return DocumentAnalysis(
             context=context_result if isinstance(context_result, dict) else {"summary": str(context_result)},
             paragraphs=paragraph_results,
@@ -237,10 +239,13 @@ async def process_regulatory_obligation(
 # --- Entry Point ---
 if __name__ == "__main__":
     async def main():
-        result = await process_regulatory_obligation(
-            input_type="file upload",
-            input_source="Sample regulatory text here...\n\nSecond paragraph here..."
-        )
-        print(result.model_dump_json(indent=2))
+        try:
+            result = await process_regulatory_obligation(
+                input_type="file upload",
+                input_source="Sample regulatory text here...\n\nSecond paragraph here..."
+            )
+            print(result.model_dump_json(indent=2))
+        except Exception as e:
+            print(f"Error: {e}")
 
     asyncio.run(main())

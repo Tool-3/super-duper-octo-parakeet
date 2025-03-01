@@ -8,7 +8,6 @@ from langchain_groq import ChatGroq
 from langchain_google_genai import ChatGoogleGenerativeAI
 from concurrent.futures import ThreadPoolExecutor
 import warnings
-
 warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
 warnings.filterwarnings("ignore", category=SyntaxWarning)
 
@@ -158,10 +157,8 @@ async def process_paragraph(paragraph: str, agents: Dict[str, BaseAgent]) -> Par
         Task(description="Suggest mitigations", agent=agents["mitigation"]),
         Task(description="Plan timelines", agent=agents["timeline"])
     ]
-    
     crew = Crew(agents=list(agents.values()), tasks=tasks)
     results = await asyncio.to_thread(crew.kickoff)
-
     actions = []
     for i in range(len(results[0] or [])):
         actions.append(ActionItem(
@@ -170,9 +167,7 @@ async def process_paragraph(paragraph: str, agents: Dict[str, BaseAgent]) -> Par
             compliance_status=str(results[1][i]) if results[1] else "Pending",
             timeline=str(results[4][i]) if results[4] else "TBD"
         ))
-
     mitigations = [RiskMitigation(**m) for m in (results[3] or []) if isinstance(m, dict)]
-    
     return ParagraphAnalysis(
         text=paragraph,
         actions=actions,
@@ -198,7 +193,6 @@ async def process_regulatory_obligation(
             document_content = input_source
         else:
             raise ValueError(f"Invalid input type: {input_type}")
-
         if not document_content.strip():
             raise ValueError("Empty document content")
 
@@ -216,32 +210,27 @@ async def process_regulatory_obligation(
 
         # Process document
         paragraphs = await parse_document(parser_agent, document_content)
-        
         context_task = Task(description="Analyze document context", agent=context_agent)
         context_crew = Crew(agents=[context_agent], tasks=[context_task])
         context_result = await asyncio.to_thread(context_crew.kickoff)
-
         # Parallel paragraph processing
         async with ThreadPoolExecutor(max_workers=4) as executor:
             paragraph_tasks = [process_paragraph(para, agents) for para in paragraphs]
             paragraph_results = await asyncio.gather(*paragraph_tasks)
-
         # Generate report
         report_task = Task(
             description="Generate comprehensive report",
             agent=agents["report"],
-            context=[context_task] + [Task(description=f"Paragraph {i}", agent=agents["report"]) 
+            context=[context_task] + [Task(description=f"Paragraph {i}", agent=agents["report"])
                                     for i in range(len(paragraphs))]
         )
         report_crew = Crew(agents=[agents["report"]], tasks=[report_task])
         report_result = await asyncio.to_thread(report_crew.kickoff)
-
         return DocumentAnalysis(
             context=context_result if isinstance(context_result, dict) else {"summary": str(context_result)},
             paragraphs=paragraph_results,
             report=str(report_result)
         )
-
     except Exception as e:
         raise RuntimeError(f"Processing failed: {str(e)}")
 

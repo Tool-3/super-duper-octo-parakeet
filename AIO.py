@@ -87,7 +87,7 @@ class AgentFactory:
     @staticmethod
     def create_parser(temperature: float, model_name: str = None):
         return BaseAgent(
-            LLMFactory.get_llm("groq", temperature, model_name),
+            LLMFactory.get_llm(api_choice, temperature, model_name),
             "Regulatory Parser",
             "Parse regulatory documents efficiently",
             "Specialized in document structure analysis"
@@ -96,7 +96,7 @@ class AgentFactory:
     @staticmethod
     def create_context(temperature: float, industry: str, model_name: str = None):
         return BaseAgent(
-            LLMFactory.get_llm("groq", temperature, model_name),
+            LLMFactory.get_llm(api_choice, temperature, model_name),
             "Context Analyzer",
             f"Analyze regulatory context for {industry}",
             "Expert in industry compliance"
@@ -114,7 +114,7 @@ class AgentFactory:
     @staticmethod
     def create_compliance(temperature: float, industry: str, model_name: str = None):
         return BaseAgent(
-            LLMFactory.get_llm("groq", temperature, model_name),
+            LLMFactory.get_llm(api_choice, temperature, model_name),
             "Compliance Checker",
             f"Verify compliance for {industry}",
             "Regulatory compliance expert"
@@ -123,7 +123,7 @@ class AgentFactory:
     @staticmethod
     def create_priority(temperature: float, model_name: str = None):
         return BaseAgent(
-            LLMFactory.get_llm("groq", temperature, model_name),
+            LLMFactory.get_llm(api_choice, temperature, model_name),
             "Priority Assigner",
             "Assign priority levels",
             "Risk assessment specialist"
@@ -141,7 +141,7 @@ class AgentFactory:
     @staticmethod
     def create_timeline(temperature: float, model_name: str = None):
         return BaseAgent(
-            LLMFactory.get_llm("groq", temperature, model_name),
+            LLMFactory.get_llm(api_choice, temperature, model_name),
             "Timeline Planner",
             "Plan implementation timelines",
             "Project scheduling expert"
@@ -150,7 +150,7 @@ class AgentFactory:
     @staticmethod
     def create_report(temperature: float, model_name: str = None):
         return BaseAgent(
-            LLMFactory.get_llm("groq", temperature, model_name),
+            LLMFactory.get_llm(api_choice, temperature, model_name),
             "Report Generator",
             "Generate structured reports",
             "Documentation specialist"

@@ -1,14 +1,15 @@
 import os
 import asyncio
 import aiohttp
-from typing import List, Dict, Any
-from pydantic import BaseModel
+from typing import List, Dict, Any, Optional
+from pydantic import BaseModel, ValidationError
 from crewai import Crew, Agent, Task
 from langchain_groq import ChatGroq
 from langchain_google_genai import ChatGoogleGenerativeAI
 from concurrent.futures import ThreadPoolExecutor
 import warnings
 import logging
+import json
 
 # Suppress specific warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
@@ -45,18 +46,20 @@ class LLMFactory:
     _instances: Dict[tuple, Any] = {}
 
     @classmethod
-    def get_llm(cls, api_choice: str, temperature: float):
-        key = (api_choice, temperature)
+    def get_llm(cls, api_choice: str, temperature: float, model_name: str = None):
+        key = (api_choice, temperature, model_name)
         if key not in cls._instances:
             if api_choice == "groq":
+                model = model_name or "mixtral-8x7b-32768"
                 cls._instances[key] = ChatGroq(
                     temperature=temperature,
-                    model="mixtral-8x7b-32768",
+                    model=model,
                     groq_api_key=os.getenv("GROQ_API_KEY")
                 )
             elif api_choice == "google_ai":
+                model = model_name or "gemini-2.0-flash"
                 cls._instances[key] = ChatGoogleGenerativeAI(
-                    model="gemini-2.0-flash",
+                    model=model,
                     temperature=temperature,
                     google_api_key=os.getenv("GOOGLE_API_KEY")
                 )
@@ -81,72 +84,72 @@ class BaseAgent(Agent):
 # --- Agent Factory ---
 class AgentFactory:
     @staticmethod
-    def create_parser(temperature: float):
+    def create_parser(temperature: float, model_name: str = None):
         return BaseAgent(
-            LLMFactory.get_llm("groq", temperature),
+            LLMFactory.get_llm("groq", temperature, model_name),
             "Regulatory Parser",
             "Parse regulatory documents efficiently",
             "Specialized in document structure analysis"
         )
 
     @staticmethod
-    def create_context(temperature: float, industry: str):
+    def create_context(temperature: float, industry: str, model_name: str = None):
         return BaseAgent(
-            LLMFactory.get_llm("groq", temperature),
+            LLMFactory.get_llm("groq", temperature, model_name),
             "Context Analyzer",
             f"Analyze regulatory context for {industry}",
             "Expert in industry compliance"
         )
 
     @staticmethod
-    def create_action(api_choice: str, temperature: float, industry: str):
+    def create_action(api_choice: str, temperature: float, industry: str, model_name: str = None):
         return BaseAgent(
-            LLMFactory.get_llm(api_choice, temperature),
+            LLMFactory.get_llm(api_choice, temperature, model_name),
             "Action Extractor",
             f"Extract actionable items for {industry}",
             "Compliance action specialist"
         )
 
     @staticmethod
-    def create_compliance(temperature: float, industry: str):
+    def create_compliance(temperature: float, industry: str, model_name: str = None):
         return BaseAgent(
-            LLMFactory.get_llm("groq", temperature),
+            LLMFactory.get_llm("groq", temperature, model_name),
             "Compliance Checker",
             f"Verify compliance for {industry}",
             "Regulatory compliance expert"
         )
 
     @staticmethod
-    def create_priority(temperature: float):
+    def create_priority(temperature: float, model_name: str = None):
         return BaseAgent(
-            LLMFactory.get_llm("groq", temperature),
+            LLMFactory.get_llm("groq", temperature, model_name),
             "Priority Assigner",
             "Assign priority levels",
             "Risk assessment specialist"
         )
 
     @staticmethod
-    def create_mitigation(api_choice: str, temperature: float, industry: str):
+    def create_mitigation(api_choice: str, temperature: float, industry: str, model_name: str = None):
         return BaseAgent(
-            LLMFactory.get_llm(api_choice, temperature),
+            LLMFactory.get_llm(api_choice, temperature, model_name),
             "Risk Mitigator",
             f"Develop mitigation strategies for {industry}",
             "Risk management expert"
         )
 
     @staticmethod
-    def create_timeline(temperature: float):
+    def create_timeline(temperature: float, model_name: str = None):
         return BaseAgent(
-            LLMFactory.get_llm("groq", temperature),
+            LLMFactory.get_llm("groq", temperature, model_name),
             "Timeline Planner",
             "Plan implementation timelines",
             "Project scheduling expert"
         )
 
     @staticmethod
-    def create_report(temperature: float):
+    def create_report(temperature: float, model_name: str = None):
         return BaseAgent(
-            LLMFactory.get_llm("groq", temperature),
+            LLMFactory.get_llm("groq", temperature, model_name),
             "Report Generator",
             "Generate structured reports",
             "Documentation specialist"
@@ -159,29 +162,57 @@ async def parse_document(agent: BaseAgent, content: str) -> List[str]:
 
 async def process_paragraph(paragraph: str, agents: Dict[str, BaseAgent]) -> ParagraphAnalysis:
     logger.debug(f"Processing paragraph: {paragraph[:50]}...")
-    tasks = [
-        Task(description=f"Extract actions from: {paragraph[:100]}...", agent=agents["action"]),
-        Task(description="Check compliance", agent=agents["compliance"]),
-        Task(description="Assign priorities", agent=agents["priority"]),
-        Task(description="Suggest mitigations", agent=agents["mitigation"]),
-        Task(description="Plan timelines", agent=agents["timeline"])
-    ]
-    crew = Crew(agents=list(agents.values()), tasks=tasks)
-    results = await asyncio.to_thread(crew.kickoff)
-    actions = []
-    for i in range(len(results[0] or [])):
-        actions.append(ActionItem(
-            description=str(results[0][i]) if results[0] else "No action identified",
-            priority=str(results[2][i]) if results[2] else "Medium",
-            compliance_status=str(results[1][i]) if results[1] else "Pending",
-            timeline=str(results[4][i]) if results[4] else "TBD"
-        ))
-    mitigations = [RiskMitigation(**m) for m in (results[3] or []) if isinstance(m, dict)]
-    return ParagraphAnalysis(
-        text=paragraph,
-        actions=actions,
-        mitigations=mitigations
-    )
+
+    action_task = Task(description=f"Extract actions from: {paragraph[:100]}...", agent=agents["action"])
+    compliance_task = Task(description="Check compliance", agent=agents["compliance"])
+    priority_task = Task(description="Assign priorities", agent=agents["priority"])
+    mitigation_task = Task(description="Suggest mitigations", agent=agents["mitigation"])
+    timeline_task = Task(description="Plan timelines", agent=agents["timeline"])
+
+    crew = Crew(agents=list(agents.values()), tasks=[action_task, compliance_task, priority_task, mitigation_task, timeline_task])
+
+    try:
+        results = await crew.kickoff()
+
+        # Extract results based on task descriptions
+        action_results = next((r for r in results if action_task.description in r), [])
+        compliance_results = next((r for r in results if compliance_task.description in r), [])
+        priority_results = next((r for r in results if priority_task.description in r), [])
+        mitigation_results = next((r for r in results if mitigation_task.description in r), [])
+        timeline_results = next((r for r in results if timeline_task.description in r), [])
+
+        actions = []
+        for i in range(max(len(action_results), len(priority_results), len(compliance_results), len(timeline_results))):
+            actions.append(ActionItem(
+                description=str(action_results[i]) if i < len(action_results) else "No action identified",
+                priority=str(priority_results[i]) if i < len(priority_results) else "Medium",
+                compliance_status=str(compliance_results[i]) if i < len(compliance_results) else "Pending",
+                timeline=str(timeline_results[i]) if i < len(timeline_results) else "TBD"
+            ))
+
+        mitigations = []
+        for m in mitigation_results:
+            try:
+                if isinstance(m, str):
+                    # Attempt to parse the string as JSON
+                    mitigation_data = json.loads(m)
+                    mitigations.append(RiskMitigation(**mitigation_data))
+                elif isinstance(m, dict):
+                    mitigations.append(RiskMitigation(**m))
+                else:
+                    logger.warning(f"Unexpected mitigation format: {type(m)}, skipping.")
+            except (json.JSONDecodeError, ValidationError) as e:
+                logger.error(f"Error processing mitigation: {m}. Error: {e}")
+
+        return ParagraphAnalysis(
+            text=paragraph,
+            actions=actions,
+            mitigations=mitigations
+        )
+
+    except Exception as e:
+        logger.exception(f"Error processing paragraph: {paragraph[:100]}...")
+        return ParagraphAnalysis(text=paragraph, actions=[], mitigations=[])  # Return a default object
 
 # --- Main Processing Function ---
 async def process_regulatory_obligation(
@@ -190,63 +221,74 @@ async def process_regulatory_obligation(
     api_actions: str = "groq",
     api_mitigation: str = "groq",
     temperature: float = 0.5,
-    industry: str = "General"
+    industry: str = "General",
+    groq_model_name: str = None,
+    google_model_name: str = None
 ) -> DocumentAnalysis:
     try:
         logger.debug(f"Starting processing with input type: {input_type}, source: {input_source}")
-        
+
         # Load content
         if input_type == "url":
             async with aiohttp.ClientSession() as session:
-                async with session.get(input_source, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                    document_content = await resp.text()
+                try:
+                    async with session.get(input_source, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                        resp.raise_for_status()  # Raise HTTPError for bad responses (4xx or 5xx)
+                        document_content = await resp.text()
+                except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                    raise RuntimeError(f"Failed to fetch URL: {e}")
         elif input_type == "file upload":
             document_content = input_source
         else:
             raise ValueError(f"Invalid input type: {input_type}")
+
         if not document_content.strip():
             raise ValueError("Empty document content")
 
         # Initialize agents
-        parser_agent = AgentFactory.create_parser(temperature)
-        context_agent = AgentFactory.create_context(temperature, industry)
+        parser_agent = AgentFactory.create_parser(temperature, groq_model_name)
+        context_agent = AgentFactory.create_context(temperature, industry, groq_model_name)
         agents = {
-            "action": AgentFactory.create_action(api_actions, temperature, industry),
-            "compliance": AgentFactory.create_compliance(temperature, industry),
-            "priority": AgentFactory.create_priority(temperature),
-            "mitigation": AgentFactory.create_mitigation(api_mitigation, temperature, industry),
-            "timeline": AgentFactory.create_timeline(temperature),
-            "report": AgentFactory.create_report(temperature)
+            "action": AgentFactory.create_action(api_actions, temperature, industry, groq_model_name),
+            "compliance": AgentFactory.create_compliance(temperature, industry, groq_model_name),
+            "priority": AgentFactory.create_priority(temperature, groq_model_name),
+            "mitigation": AgentFactory.create_mitigation(api_mitigation, temperature, industry, groq_model_name),
+            "timeline": AgentFactory.create_timeline(temperature, groq_model_name),
+            "report": AgentFactory.create_report(temperature, groq_model_name)
         }
 
         # Process document
         paragraphs = await parse_document(parser_agent, document_content)
+
+        # Analyze context - Directly use the agent to avoid unnecessary Crew
         context_task = Task(description="Analyze document context", agent=context_agent)
-        context_crew = Crew(agents=[context_agent], tasks=[context_task])
-        context_result = await asyncio.to_thread(context_crew.kickoff)
+        context_result = await context_task.execute(context=document_content)
+
         # Parallel paragraph processing
-        async with ThreadPoolExecutor(max_workers=4) as executor:
-            paragraph_tasks = [process_paragraph(para, agents) for para in paragraphs]
-            paragraph_results = await asyncio.gather(*paragraph_tasks)
+        paragraph_results = []
+        for para in paragraphs:
+            result = await process_paragraph(para, agents)
+            paragraph_results.append(result)
 
         # Generate report
+        report_agent = agents["report"]  # Get the report agent
+        paragraph_context = "\n".join([f"Paragraph {i+1}: {p.text}" for i, p in enumerate(paragraph_results)])  # Joining paragraph contexts
         report_task = Task(
             description="Generate comprehensive report",
-            agent=agents["report"],
-            context=[context_task] + [Task(description=f"Paragraph {i}", agent=agents["report"])
-                                    for i in range(len(paragraphs))]
+            agent=report_agent,
+            context=f"Overall context: {context_result}\nParagraph summaries: {paragraph_context}"
         )
-        report_crew = Crew(agents=[agents["report"]], tasks=[report_task])
-        report_result = await asyncio.to_thread(report_crew.kickoff)
+        report_result = await report_task.execute(context=f"Overall context: {context_result}\nParagraph summaries: {paragraph_context}")
 
         logger.debug("Document processed successfully")
         return DocumentAnalysis(
-            context=context_result if isinstance(context_result, dict) else {"summary": str(context_result)},
+            context={"summary": str(context_result)},
             paragraphs=paragraph_results,
             report=str(report_result)
         )
+
     except Exception as e:
-        logger.error(f"Processing failed: {str(e)}")
+        logger.exception(f"Processing failed: {str(e)}")
         raise RuntimeError(f"Processing failed: {str(e)}")
 
 # --- Entry Point ---
@@ -255,9 +297,15 @@ if __name__ == "__main__":
         try:
             result = await process_regulatory_obligation(
                 input_type="file upload",
-                input_source="Sample regulatory text here...\n\nSecond paragraph here..."
+                input_source="Sample regulatory text here...\n\nSecond paragraph here...",
+                api_actions="groq",
+                api_mitigation="groq"
             )
-            print(result.model_dump_json(indent=2))
+            try:
+                print(result.model_dump_json(indent=2))
+            except Exception as e:
+                print(f"Error while dumping model to JSON: {e}")
+                print(result) # printing the object
         except Exception as e:
             print(f"Error: {e}")
 

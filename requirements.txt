@@ -1,5 +1,5 @@
 aiohttp
-chromadb==0.4.14
+chromadb
 streamlit
 langchain-groq
 google.generativeai
@@ -10,5 +10,5 @@ pypdfium2
 python-docx
 langchain-google-genai
 duckduckgo-search
-crewai==0.86.0
-crewai-tools==0.25.8
+crewai
+crewai-tools

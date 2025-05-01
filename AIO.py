@@ -26,7 +26,7 @@ else:
 
 # --- Tool Setup --- 
 # Tool for searching the web for RBI notifications/circulars
-search_tool = SerperDevTool()
+search_tool = SerperApiTool()
 
 # Tool for scraping content from a specific URL found by the search tool
 scrape_tool = ScrapeWebsiteTool()

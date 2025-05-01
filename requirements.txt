@@ -1,5 +1,7 @@
+crewai
+crewai-tools
 aiohttp
-chromadb
+chromadb==0.4.14
 streamlit
 langchain-groq
 google.generativeai
@@ -10,5 +12,4 @@ pypdfium2
 python-docx
 langchain-google-genai
 duckduckgo-search
-crewai
-crewai-tools
+

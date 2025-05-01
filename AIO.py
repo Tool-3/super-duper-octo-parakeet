@@ -3,11 +3,13 @@ import os
 from crewai import Agent, Task, Crew, Process
 from crewai_tools import ScrapeWebsiteTool, SerperDevTool
 from langchain_google_genai import ChatGoogleGenerativeAI
+
 # --- Configuration --- 
 # IMPORTANT: Set your API keys as environment variables
 # os.environ["GOOGLE_API_KEY"] = "YOUR_GOOGLE_API_KEY"
 # os.environ["SERPER_API_KEY"] = "YOUR_SERPER_API_KEY"
 # Make sure to install necessary libraries: pip install streamlit crewai crewai-tools langchain-google-genai duckduckgo-search
+
 # --- LLM Setup --- 
 # Ensure the GOOGLE_API_KEY environment variable is set
 google_api_key = os.getenv("GOOGLE_API_KEY")
@@ -21,16 +23,22 @@ if google_api_key:
     )
 else:
     st.warning("GOOGLE_API_KEY not found in environment variables. LLM functionality will be limited or unavailable.")
+
 # --- Tool Setup --- 
 # Tool for searching the web for RBI notifications/circulars
 search_tool = SerperDevTool()
+
 # Tool for scraping content from a specific URL found by the search tool
 scrape_tool = ScrapeWebsiteTool()
+
 # --- Agent Definitions --- 
 st.title("RBI Regulatory Analysis Crew (using Gemini)")
+
 st.info("**Note:** This is a conceptual example. Accessing and interpreting RBI data accurately requires robust tools and potentially specific scraping logic tailored to rbi.org.in.")
+
 # Placeholder for user input, e.g., specific topics or date ranges
 query = st.text_input("Enter search query for RBI documents (e.g., 'RBI Master Directions KYC 2023')", "latest RBI master circulars")
+
 # Agent 1: Researcher
 # Finds relevant RBI documents online.
 rbi_researcher = Agent(
@@ -47,6 +55,7 @@ rbi_researcher = Agent(
   tools=[search_tool, scrape_tool],
   llm=llm # Specify the Gemini model
 )
+
 # Agent 2: Regulatory Analyst
 # Extracts obligations from the documents.
 regulatory_analyst = Agent(
@@ -62,6 +71,7 @@ regulatory_analyst = Agent(
   allow_delegation=False,
   llm=llm # Specify the Gemini model
 )
+
 # Agent 3: Risk Assessor
 # Identifies risks and suggests mitigation strategies.
 risk_assessor = Agent(
@@ -77,7 +87,9 @@ risk_assessor = Agent(
   allow_delegation=False,
   llm=llm # Specify the Gemini model
 )
+
 # --- Task Definitions --- 
+
 # Task 1: Find RBI Documents
 find_docs_task = Task(
   description=("""
@@ -89,6 +101,7 @@ find_docs_task = Task(
   expected_output='A list of relevant RBI document URLs and, if possible, their scraped text content or summaries.',
   agent=rbi_researcher
 )
+
 # Task 2: Extract Obligations
 extract_obligations_task = Task(
   description=("""
@@ -100,6 +113,7 @@ extract_obligations_task = Task(
   agent=regulatory_analyst,
   context=[find_docs_task] # Depends on the output of the first task
 )
+
 # Task 3: Assess Risks and Mitigation
 assess_risk_task = Task(
   description=("""
@@ -111,14 +125,18 @@ assess_risk_task = Task(
   agent=risk_assessor,
   context=[extract_obligations_task] # Depends on the output of the second task
 )
+
 # --- Crew Definition --- 
+
 rbi_crew = Crew(
   agents=[rbi_researcher, regulatory_analyst, risk_assessor],
   tasks=[find_docs_task, extract_obligations_task, assess_risk_task],
   process=Process.sequential, # Tasks will be executed sequentially
   verbose=2 # Shows agent reasoning and actions
 )
+
 # --- Streamlit Execution --- 
+
 if st.button("Start Analysis"):
     # Check for necessary API keys
     serper_api_key = os.getenv("SERPER_API_KEY")

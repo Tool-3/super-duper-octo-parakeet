@@ -12,3 +12,8 @@ pydantic
 python-dotenv
 pypdfium2 
 python-docx
+streamlit 
+crewai 
+crewai-tools
+langchain-google-genai
+duckduckgo-search
